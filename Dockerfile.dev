@@ -1,0 +1,78 @@
+# System
+ARG UBUNTU_VERSION=20.04
+ARG CUDA_VERSION=11.8.0
+ARG CUDNN_VERSION=cudnn8
+ARG JAX_VERSION=cuda11_local
+ARG WHICHONE=devel
+ARG BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-${CUDNN_VERSION}-${WHICHONE}-ubuntu${UBUNTU_VERSION}
+
+FROM ${BASE_IMAGE} as base
+
+# ENV TORCH_VERSION=1.13.1
+# ENV CUDA_VERSION_SHORT=cu118
+ENV PYTHON_VERSION=3.8
+
+#unnecessary, comes with the base image
+# RUN apt-get update && apt-get install zlib1g
+# RUN echo "Acquire::AllowInsecureRepositories true;" >> /etc/apt/apt.conf.d/99allow-insecure-verify
+# COPY dreamerv3/cudnn-local-repo-ubuntu2004-8.9.2.26_1.0-1_amd64.deb /tmp/cudnn.deb
+# RUN dpkg -i /tmp/cudnn.deb
+
+ARG DEBIAN_FRONTEND=noninteractive
+ENV TZ=America/San_Francisco
+ENV PYTHONUNBUFFERED 1
+ENV PIP_DISABLE_PIP_VERSION_CHECK 1
+ENV PIP_NO_CACHE_DIR 1
+
+RUN apt-get update && apt-get install -y \
+  ffmpeg git tmux neovim libglew-dev \
+  x11-xserver-utils xvfb \
+  && apt-get clean
+
+RUN apt-get update && apt-get install -y python${PYTHON_VERSION} python3-pip
+RUN ln -sf /usr/bin/python3.8 /usr/local/bin/python
+RUN alias pip=pip3
+RUN pip3 install --upgrade pip
+RUN apt-get clean
+
+# Embodied
+RUN pip3 install numpy cloudpickle ruamel.yaml rich zmq msgpack
+# RUN pip install torch==${TORCH_VERSION}+${CUDA_VERSION_SHORT} torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/${CUDA_VERSION_SHORT}
+# RUN pip install opencv-python
+COPY dreamerv3 /dreamerv3
+RUN chown -R 1000:root /dreamerv3 && chmod -R 775 /dreamerv3
+
+# Envs
+ENV MUJOCO_GL egl
+ENV DMLAB_DATASET_PATH /dmlab_data
+
+RUN sh /dreamerv3/embodied/scripts/install-dmlab.sh
+RUN sh /dreamerv3/embodied/scripts/install-atari.sh
+RUN sh /dreamerv3/embodied/scripts/install-minecraft.sh
+ENV NUMBA_CACHE_DIR=/tmp
+RUN pip3 install crafter
+RUN pip3 install dm_control
+RUN pip3 install robodesk
+RUN pip3 install bsuite
+
+# Agent
+# RUN pip3 install jax[cuda11_cudnn82] -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+# RUN pip install --upgrade "jax[${JAX_VERSION}]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+RUN pip install --upgrade "jax[cuda11_local]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+#RUN pip3 install jaxlib #above gets this too
+RUN pip3 install tensorflow_probability
+RUN pip3 install optax
+RUN pip3 install tensorflow-cpu
+ENV XLA_PYTHON_CLIENT_MEM_FRACTION 0.8
+
+# Google Cloud DNS cache (optional)
+ENV GCS_RESOLVE_REFRESH_SECS=60
+ENV GCS_REQUEST_CONNECTION_TIMEOUT_SECS=300
+ENV GCS_METADATA_REQUEST_TIMEOUT_SECS=300
+ENV GCS_READ_REQUEST_TIMEOUT_SECS=300
+ENV GCS_WRITE_REQUEST_TIMEOUT_SECS=600
+
+RUN echo "alias v=nvim" >> /root/.bashrc
+RUN echo "set +e" >> /root/.bashrc
+
+WORKDIR /dreamerv3
